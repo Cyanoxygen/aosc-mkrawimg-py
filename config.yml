@@ -1,0 +1,62 @@
+#
+# General Configuration
+#
+general:
+# Note: These options can be overrided by command line options.
+  # Work Directory
+  # Command line options: -w, --workdir
+  workdir: /var/cache/mkrawimg
+  # Do not upgrade the target OS, reduces network usage.
+  # Command line options: -U, --no-upgrade
+  noupgrade: no
+  # Do not clean up files regardless the creation is successful or failed.
+  # Command line options: -C, --no-cleanup
+  nocleanup: no
+  # Do not recreate a zeroed disk image if the image is not deleted.
+  # Command line options: -R, --no-recreate
+  norecreate: no
+  # Turn on debug output.
+  # Command line options: -v, --verbose
+  verbose: no
+  # Prefix of the mountpoints.
+  # Command line options: -P, --mount-prefix
+  mntprefix: /mnt/mkrawimg
+
+#
+# OS Install Settings
+#
+os-install:
+  # The language used by the OS
+  lang: en_US.UTF-8
+
+  # The time zone used by the OS
+  timezone: Asia/Shanghai
+
+  # Default host name for the OS
+  hostname: "aosc-:platform-id:"
+
+  # Whether to create a user for the OS
+  createuser: true
+
+  # The user name built-in
+  username: aosc
+
+  # Password of that user
+  password: anthon
+
+  # Full name of that user
+  fullname: AOSC OS Built-in user
+
+  # Groups the user will be in
+  groups: audio,video,tty,wheel
+
+  # NOPASSWD in sudo for the user
+  nopasswd: yes
+
+  # OS install method
+  # Can be tarball | bootstrap (not implemented)
+  method: tarball
+
+  # Package list for bootstrapping the base OS
+  bootstrap:
+    - base

@@ -1,0 +1,16 @@
+# Post-install configuration of the device
+
+# Extra APT repositories for this device e.g. bsp-rpi
+# Type: list
+ext-repo:
+  - bsp-rpi
+
+# Packages required to be installed fot this device
+# Type: list
+packages:
+  common:
+    - 'rpi-firmware-boot'
+    - 'rpi-firmware-bluez'
+    - 'rpi-userland'
+    - 'linux-kernel-rpi64'
+    - 'firmware-nonfree'

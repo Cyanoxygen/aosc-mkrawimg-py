@@ -1,0 +1,80 @@
+# Platform ID
+id: rpi-4
+fullname: Raspberry Pi 4 Series
+# Platform description
+description: Various 4th-Gen Raspberry Pi boards using BCM2711 SOC
+# Variants of this device
+models:
+  rpi-4b: Raspberry Pi 4B
+  rpi-400: Raspberry Pi 400
+  rpi-cm4: Raspberry Pi Compute Module 4
+
+# Image creation
+image:
+  # Image size
+  size: 5120
+  # Partition table type
+  # can be dos | gpt
+  map: gpt
+  # Sector size
+  sector: 512
+  # Start of the first partition (sectors)
+  start: 2048
+
+# Partitions of that image
+partitions:
+  -
+    # Partition number
+    num: 1
+    # Partition name
+    name: 'boot'
+    # Partition size (MiB)
+    # -1 for the entire image
+    size: 100
+    # Partition type
+    # Please use GUID for GPT, two-digit hex number for MBR
+    type: 'C12A7328-F81F-11D2-BA4B-00A0C93EC93B'
+    # Filesystem for this partition
+    # can be vary | raw (does not format)
+    fs: 'vfat'
+    # Mount point of this partition
+    # Can be vary | none (don't mount)
+    mount: '/boot/rpi'
+    # Some extra settings
+    # file: file to flash in this partition.
+    # This is convenient for flashing bootloaders in a partition.
+    # The image file should be placed in images/ folder under current device folder.
+    # mountopt: Mount options for current partition.
+    # This will be placed directly in the fstab and mount command.
+  -
+    num: 2
+    name: 'aosc'
+    size: -1
+    type: '0FC63DAF-8483-4772-8E79-3D69D8477DE4'
+    fs: 'ext4'
+    mount: '/'
+
+# Storage device
+storage:
+  common:
+    usb:
+      path: /dev/sda
+  rpi-4b:
+    sdcard:
+      path: /dev/mmcblk0
+      suffix: p
+  rpi-400:
+    mmc:
+      path: /dev/mmcblk0
+      suffix: p
+    sdcard:
+      path: /dev/mmcblk1
+      suffix: p
+
+# Some extra settings
+# - flash: A list of dictionaries specifying images to be directly flashed into the image.
+# This is for some devices which requires a bootloader exists in an exact location instead of in a filesystem.
+#  -
+#    file: file to flash.
+#    Same as above, the file should be placed in images/ folder.
+#    location: The location it will be placed in (Sectors).

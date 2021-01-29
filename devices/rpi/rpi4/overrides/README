@@ -1,0 +1,10 @@
+This directory is used to store files to copy or override to the target OS.
+
+Subdirectories:
+
+- `common' is for every device in this target
+- `modelname` is for a specific device in this target
+
+Permissions
+
+Permission of all files copied to target OS is `0644`.
