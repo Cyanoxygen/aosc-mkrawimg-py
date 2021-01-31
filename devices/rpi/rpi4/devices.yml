@@ -1,5 +1,5 @@
 # Platform ID
-id: rpi-4
+id: rpi4
 fullname: Raspberry Pi 4 Series
 # Platform description
 description: Various 4th-Gen Raspberry Pi boards using BCM2711 SOC
