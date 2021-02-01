@@ -8,24 +8,26 @@ models:
   - rpi-cm3: Raspberry Pi Compute Module 3
 
 image:
-  size: 5120
-  map: mbr
-  sector: 512
-  start: 2048
+  common:
+    size: 5120
+    map: mbr
+    sector: 512
+    start: 2048
 
 partitions:
-  -
-    num: 1
-    label: boot
-    size: 100
-    type: '0c'
-    fs: 'vfat'
-    mount: '/boot/rpi'
-  -
-    # Two primary partitions is enough.
-    num: 2
-    name: 'aosc'
-    size: -1
-    type: '83'
-    fs: 'ext4'
-    mount: '/'
+  common:
+    -
+      num: 1
+      label: boot
+      size: 100
+      type: '0c'
+      fs: 'vfat'
+      mount: '/boot/rpi'
+    -
+      # Two primary partitions is enough.
+      num: 2
+      name: 'aosc'
+      size: -1
+      type: '83'
+      fs: 'ext4'
+      mount: '/'
