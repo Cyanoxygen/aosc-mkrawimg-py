@@ -23,6 +23,7 @@ partitions:
       type: 0c
       fs: vfat
       mount: /boot/rpi
+      bootable: yes
     -
       # Two primary partitions is enough.
       num: 2
