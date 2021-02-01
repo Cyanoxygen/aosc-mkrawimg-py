@@ -29,7 +29,7 @@ partitions:
       # Partition number
       num: 1
       # Partition name
-      name: 'boot'
+      name: boot
       # Partition size (MiB)
       # -1 for the entire image
       size: 100
@@ -38,10 +38,10 @@ partitions:
       type: 'C12A7328-F81F-11D2-BA4B-00A0C93EC93B'
       # Filesystem for this partition
       # can be vary | raw (does not format)
-      fs: 'vfat'
+      fs: vfat
       # Mount point of this partition
       # Can be vary | none (don't mount)
-      mount: '/boot/rpi'
+      mount: /boot/rpi
       # Some extra settings
       # file: file to flash in this partition.
       # This is convenient for flashing bootloaders in a partition.
@@ -50,11 +50,11 @@ partitions:
       # This will be placed directly in the fstab and mount command.
     -
       num: 2
-      name: 'aosc'
+      name: aosc
       size: -1
-      type: '0FC63DAF-8483-4772-8E79-3D69D8477DE4'
-      fs: 'ext4'
-      mount: '/'
+      type: 0FC63DAF-8483-4772-8E79-3D69D8477DE4
+      fs: ext4
+      mount: /
 
 # Storage device
 storage:

@@ -20,14 +20,14 @@ partitions:
       num: 1
       label: boot
       size: 100
-      type: '0c'
-      fs: 'vfat'
-      mount: '/boot/rpi'
+      type: 0c
+      fs: vfat
+      mount: /boot/rpi
     -
       # Two primary partitions is enough.
       num: 2
-      name: 'aosc'
+      name: aosc
       size: -1
-      type: '83'
-      fs: 'ext4'
-      mount: '/'
+      type: 83
+      fs: ext4
+      mount: /
