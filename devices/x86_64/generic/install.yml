@@ -1,0 +1,9 @@
+
+
+postinst:
+  x86_64-bios: |+
+    grub-install --target=i386-pc
+
+  x86_64-uefi: |+
+    grub-install --target=x86_64-efi
+  

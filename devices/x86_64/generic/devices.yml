@@ -1,0 +1,43 @@
+id: x86_64-generic-bios
+fullname: Generic x86_64 machine
+description: Generic x86_64 image
+
+models:
+  - x86_64-bios: Image for Legacy BIOS machines
+  - x86_64-uefi: Image for UEFI/OVMF machines
+
+image:
+  common:
+    size: 5120
+    sector: 512
+    start: 2048
+  x86_64-bios:
+    map: mbr
+  x86_64-uefi:
+    map: gpt
+
+partitions:
+  x86_64-uefi:
+    -
+      num: 1
+      name: esp
+      size: 200
+      type: C12A7328-F81F-11D2-BA4B-00A0C93EC93B
+      fs: vfat
+      mount: /boot/efi
+    -
+      num: 2
+      name: aosc
+      size: -1
+      type: 0FC63DAF-8483-4772-8E79-3D69D8477DE4
+      fs: ext4
+      mount: /
+  x86_64-bios:
+    -
+      num: 1
+      name: aosc
+      size: -1
+      type: 83
+      fs: ext4
+      mount: /
+      bootable: yes
