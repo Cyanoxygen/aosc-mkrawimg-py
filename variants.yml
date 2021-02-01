@@ -1,0 +1,33 @@
+variants:
+  common:
+    ext-packages:
+      - git
+      - vim
+      - emacs
+    postinst: |+
+      
+  common-gui:
+    ext-packages:
+      - fcitx5
+      - fcitx5-qt
+      - fcitx5-gtk
+      - fcitx5-configtool
+      - fcitx5-chinese-addons
+  
+  cinnamon:
+    ext-packages:
+      - cinnamon-base
+      - lightdm
+      - lightdm-gtk-greeter
+      - lightdm-gtk-greeter-settings
+
+    postinst: |+
+      systemctl enable lightdm.service
+
+  kde:
+    ext-packages:
+      - kde-base
+      - sddm
+    
+    postinst: |+
+      systemctl enable sddm.service
