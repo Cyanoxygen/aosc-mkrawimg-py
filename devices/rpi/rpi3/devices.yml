@@ -1,5 +1,6 @@
 id: rpi-3
 fullname: Raspberry Pi 3 Series
+arch: aarch64
 description: Various 3th-Gen Raspberry Pi boards using BCM283x SOC
 models:
   - rpi-3: Raspberry Pi 3

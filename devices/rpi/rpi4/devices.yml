@@ -1,6 +1,7 @@
 # Platform ID
 id: rpi4
 fullname: Raspberry Pi 4 Series
+arch: aarch64
 # Platform description
 description: Various 4th-Gen Raspberry Pi boards using BCM2711 SOC
 # Variants of this device

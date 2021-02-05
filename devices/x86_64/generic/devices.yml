@@ -1,4 +1,5 @@
 id: x86_64-generic
+arch: x86_64
 fullname: Generic x86_64 machine
 description: Generic x86_64 image
 
