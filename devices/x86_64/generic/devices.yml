@@ -1,4 +1,4 @@
-id: x86_64-generic-bios
+id: x86_64-generic
 fullname: Generic x86_64 machine
 description: Generic x86_64 image
 
