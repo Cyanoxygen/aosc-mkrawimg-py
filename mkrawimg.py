@@ -100,7 +100,52 @@ def bailout(msg: str = ''):
     sys.exit(1)
 
 
-def exc(exe: list, path: str = None, inp: str = None, test: bool = True) -> subprocess.CompletedProcess:
+class OhJesusTaskFailed(Exception):
+    """
+    Oh Jesus! A task failed! Need to abort!
+    """
+    def __init__(self, task: str, msg: str) -> None:
+        super().__init__(msg)
+        self.warn = msg
+        self.msg = f'Jesus: Task {task} failed: {msg}! Can\'t continue.'
+        self.task = task
+        crit(self.msg)
+
+    def __init__(self, task: str) -> None:
+        super().__init__()
+        self.task = task
+        self.msg = f'Jesus: Task {task} failed! Can\'t continue.'
+        crit(self.msg)
+    
+    def __str__(self) -> str:
+        return self.msg
+
+
+class OhJesusProgramExitAbnormally(Exception):
+    """
+    Oh Jesus! The program just returned non-zero status!
+    """
+    def __init__(self, proc: subprocess.CompletedProcess, msg: str) -> None:
+        super().__init__()
+        self.__str__ = f'Jesus: {msg}'
+        self.proc = proc
+        self.msg = f'Jesus: {msg}'
+        self.stderr = self.msg
+        crit(msg)
+
+    def __init__(self, proc: subprocess.CompletedProcess) -> None:
+        super().__init__()
+        self.proc = proc
+        msg = f'Jesus: {proc.args[0]} returned non-zero status {proc.returncode}.'
+        self.msg = msg
+        self.stderr = msg
+        crit(msg)
+    
+    def __str__(self) -> str:
+        return self.msg
+
+
+def exc(exe: list, path: str = None, inp: str = None, test: bool = False) -> subprocess.CompletedProcess:
     """
     Execution with subprocess.run()
     Returns a CompletedProcess object.
@@ -110,22 +155,28 @@ def exc(exe: list, path: str = None, inp: str = None, test: bool = True) -> subp
         info(f"Executing with subprocess.run {exe}, PWD={path}")
         return subprocess.run('true')
     debug(f'Executing with subprocess.run {exe}, PWD={path}')
-    ret = subprocess.run(args=exe, cwd=path, input=inp, encoding='utf-8',
+    try:
+        ret = subprocess.run(args=exe, cwd=path, input=inp, encoding='utf-8',
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
+    except FileNotFoundError as e:
+        raise OhJesusProgramExitAbnormally(f"Executable {exe[0]} not found") from e
     debug('stdout:')
-    debug(f'=======')
     for i in ret.stdout.splitlines():
         debug(i)
     debug("stderr:")
-    debug(f'=======')
     for i in ret.stderr.splitlines():
         debug(i)
     # TODO: record stdout and stderr into log file even it is not in verbose mode
+    if ret.returncode != 0:
+        raise OhJesusProgramExitAbnormally(ret)
     return ret
 
 
 class loadable:
+    """
+    A basic class with load() function using black magic (__setattr__()).
+    Most of classes in this program will inherit from this so it is not necessary to write a load() function.
+    """
     def __init__(self):
         pass
 
@@ -155,6 +206,7 @@ class AppConfig:
     """
     Holds the default app configuration, and loads config.yml.
     This class holds the `general' section of config.yml.
+    TODO refactor to inherit from loadable class.
     """
 
     class _OSConfig:
@@ -194,6 +246,7 @@ class AppConfig:
     def load_from_file(self):
         """
         Load a config.yml file.
+        TODO replace with a simple load().
         """
         confname = f'{RESDIR}/config.yml'
         if not os.path.isfile(confname):
@@ -280,6 +333,7 @@ class Environment:
 
     @staticmethod
     def check_binfmt() -> bool:
+        # TODO raise an exception instead
         supported = True
         try:
             with open('/proc/sys/fs/binfmt_misc/status') as f:
@@ -302,6 +356,7 @@ class Environment:
 
     @staticmethod
     def check_loop() -> bool:
+        # Raise an exception about this.
         loopdev = subprocess.getoutput('losetup -f')
         loop_support = ('/dev/loop' in loopdev)
         if not loop_support:
@@ -410,7 +465,7 @@ class Partition(loadable):
             if self.fs not in Env.supported_fs:
                 crit(f'Filesystem {self.fs} is not supported in this system.')
                 crit('Treating as an critical error.')
-                raise OSError(f'Unsupported filesystem: {self.fs}.')
+                raise OhJesusTaskFailed('make_fs', f'Unsupported filesystem: {self.fs}.')
             exe = f'mkfs.{self.fs}'
             opts = [exe]
             if self.name:
@@ -418,7 +473,7 @@ class Partition(loadable):
             opts.extend([f'{self.path}p{self.num}'])
             res = exc(opts)
             if res.returncode != 0:
-                raise OSError(f"Failed to make filesystem {self.fs} at {self.path}p{self.num}.")
+                raise OhJesusTaskFailed('make_fs', f"Failed to make filesystem {self.fs} at {self.path}p{self.num}.")
 
         def make(self):
             """
@@ -427,10 +482,9 @@ class Partition(loadable):
             try:
                 info(f'{self.__class__.__name__}: Making filesystem {self.num}...')
                 self.make_fs()
-            except OSError as e:
-                crit(e)
-                # Raise this to the Image.make() to fail.
-                raise e
+            except OhJesusTaskFailed as e:
+                # Chain this to the Image.make() to fail.
+                raise e from e
 
 
 class Image(loadable):
@@ -463,17 +517,32 @@ class Image(loadable):
         info(f'{self.__class__.__name__}: generated plan:\n{plan}')
         return '\n'.join(plan)
 
-    def make(self):
-        info(f'{self.__class__.__name__}: Creating an empty image...')
-        exe = ['dd', 'if=/dev/zero', f'of={self.imgpath}/{self.filename}', 'bs=1MiB', f'count={self.size}']
-        ret = exc(exe)
+    def apply_map(self):
+        info(f'{self.__class__.__name__}: Applying partition map...')
+        plan = self.gen_plan()
+        ret = exc(['sfdisk', f'{self.imgpath}/{self.filename}'], inp=plan)
         if ret.returncode != 0:
-            raise OSError('Failed to create an image.')
-        for i in self.parts:
-            info(f'Making partition {i.num}...')
-            i.make()
+            raise OhJesusTaskFailed('apply_map', "Failed to run sfdisk(8).")
+    
+    def mount(self):
+        self.loopdev = exc(['losetup', '--find']).stdout
 
-        pass
+    def make(self):
+        # Create an empty image
+        info(f'{self.__class__.__name__}: Creating an empty image...')
+        try:
+            exe = ['dd', 'if=/dev/zero', f'of={self.imgpath}/{self.filename}', 'bs=1MiB', f'count={self.size}']
+            ret = exc(exe)
+            if ret.returncode != 0:
+                raise OhJesusTaskFailed('make_image', 'Failed to create an image.')
+            # Apply partition map and load it into loop
+            self.apply_map()
+            for i in self.parts:
+                info(f'Making partition {i.num}...')
+                i.make()
+        except (OhJesusTaskFailed, OhJesusProgramExitAbnormally) as e:
+            # TODO add cleanup process
+            bailout(e)
 
 
 Env: Environment = Environment()
