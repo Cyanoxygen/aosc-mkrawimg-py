@@ -3,7 +3,6 @@
 import argparse
 import logging
 import os
-from os.path import pardir
 import platform
 import subprocess
 import sys
@@ -55,6 +54,8 @@ DEVICES = f'{PWD}/devices' if not os.path.exists(f'{RESDIR}/devices') else f'{RE
 #
 # This section configures the logging module, sets up a logger with two outputs.
 # One is the logfile, and the other is the console output.
+# TODO create a Logger class to handle this.
+# Then the todo in the exc() can be implemented.
 
 LOGGER_FORMAT = '%(asctime)-23s | %(levelname)-8s | %(message)s'
 logformatter = logging.Formatter(fmt=LOGGER_FORMAT)
@@ -93,13 +94,13 @@ if __name__ == "__main__":
 #
 #   Utility functions
 #
-
 def bailout(msg: str = ''):
     crit(f'A critical error occurred! {msg}')
     crit('Can not proceed. Bailing out.')
     sys.exit(1)
 
 
+# noinspection PyRedeclaration
 class OhJesusTaskFailed(Exception):
     """
     Oh Jesus! A task failed! Need to abort!
@@ -107,18 +108,18 @@ class OhJesusTaskFailed(Exception):
     def __init__(self, task: str, msg: str) -> None:
         super().__init__(msg)
         self.warn = msg
-        self.msg = f'Jesus: Task {task} failed: {msg}! Can\'t continue.'
+        self.stderr = f'Jesus: Task {task} failed: {msg}! Can\'t continue.'
         self.task = task
-        crit(self.msg)
+        crit(self.stderr)
 
     def __init__(self, task: str) -> None:
         super().__init__()
         self.task = task
-        self.msg = f'Jesus: Task {task} failed! Can\'t continue.'
-        crit(self.msg)
+        self.stderr = f'Jesus: Task {task} failed! Can\'t continue.'
+        crit(self.stderr)
     
     def __str__(self) -> str:
-        return self.msg
+        return self.stderr
 
 
 class OhJesusProgramExitAbnormally(Exception):
@@ -127,22 +128,32 @@ class OhJesusProgramExitAbnormally(Exception):
     """
     def __init__(self, proc: subprocess.CompletedProcess, msg: str) -> None:
         super().__init__()
-        self.__str__ = f'Jesus: {msg}'
         self.proc = proc
-        self.msg = f'Jesus: {msg}'
-        self.stderr = self.msg
-        crit(msg)
+        self.stderr = f'Jesus: {msg}'
+        crit(self.stderr)
 
     def __init__(self, proc: subprocess.CompletedProcess) -> None:
         super().__init__()
         self.proc = proc
-        msg = f'Jesus: {proc.args[0]} returned non-zero status {proc.returncode}.'
-        self.msg = msg
-        self.stderr = msg
-        crit(msg)
-    
+        self.stderr = f'Jesus: {self.proc.args[0]} returned non-zero status {self.proc.returncode}.'
+        crit(self.stderr)
+
     def __str__(self) -> str:
-        return self.msg
+        return self.stderr
+
+
+class OhJesusProgramNotFound(Exception):
+    """
+    Oh Jesus! The program you are trying to execute is not found!
+    """
+    def __init__(self, exe: str) -> None:
+        super().__init__()
+        self.exe = exe
+        self.stderr = f'Jesus: executable {self.exe} not found!'
+        crit(self.stderr)
+
+    def __str__(self) -> str:
+        return self.stderr
 
 
 def exc(exe: list, path: str = None, inp: str = None, test: bool = False) -> subprocess.CompletedProcess:
@@ -159,7 +170,8 @@ def exc(exe: list, path: str = None, inp: str = None, test: bool = False) -> sub
         ret = subprocess.run(args=exe, cwd=path, input=inp, encoding='utf-8',
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except FileNotFoundError as e:
-        raise OhJesusProgramExitAbnormally(f"Executable {exe[0]} not found") from e
+        raise OhJesusProgramNotFound(exe[0]) from e
+
     debug('stdout:')
     for i in ret.stdout.splitlines():
         debug(i)
@@ -172,7 +184,7 @@ def exc(exe: list, path: str = None, inp: str = None, test: bool = False) -> sub
     return ret
 
 
-class loadable:
+class Loadable:
     """
     A basic class with load() function using black magic (__setattr__()).
     Most of classes in this program will inherit from this so it is not necessary to write a load() function.
@@ -295,6 +307,7 @@ class AppConfig:
 
 Config: AppConfig = AppConfig()
 
+
 class Environment:
     """
     Environment: Class to check system environment.
@@ -345,7 +358,7 @@ class Environment:
                 # Restart binfmt first
                 subprocess.run(['systemctl', 'restart', 'systemd-binfmt.service'])
                 if len(os.listdir('/proc/sys/fs/binfmt_misc/')) > 2:
-                    return
+                    return False
                 warn('Your system supports binfmt, but no foreign architecture support is enabled.')
                 warn('Please ensure you have qemu and qemu-user-static installed.')
                 supported = False
@@ -382,7 +395,7 @@ class Environment:
         self.binfmt = self.check_binfmt()
 
 
-class Device(loadable):
+class Device(Loadable):
     def __init__(self):
         """
         Loads a device configuration.
@@ -401,93 +414,94 @@ class Device(loadable):
 #
 #   Device-related class
 #
-class Partition(loadable):
+class Partition(Loadable):
+    """
+    Defines a partition.
+    """
+    option_label = {
+        'vfat': '-n',
+        'ext4': '-L',
+        'btrfs': '-L'
+    }
+
+    def __init__(self, parent: 'Image'):
+        super().__init__()
+        self.path: str = '/dev/loop0'
+        self.num: int = 1
+        self.name: str = 'aosc'
+        self.size: int = -1
+        self.type: str = '83'
+        self.fs: str = 'ext4'
+        self.mount: str = '/'
+        self.bootable: bool = True
+        self.mountopt: str = ''
+        self.flash: False
+        self.file: str = ''
+        self.ready: bool = False
+        self.image = parent
+
+    def gen_plan(self):
         """
-        Defines a partition.
+        Generate a sfdisk(8) script. One partition at a time.
         """
-        option_label = {
-            'vfat': '-n',
-            'ext4': '-L',
-            'btrfs': '-L'
-        }
-        def __init__(self, parent: object):
-            super().__init__()
-            self.path: str = '/dev/loop0'
-            self.num: int = 1
-            self.name: str = 'aosc'
-            self.size: int = -1
-            self.type: str = '83'
-            self.fs: str = 'ext4'
-            self.mount: str = '/'
-            self.bootable: bool = True
-            self.mountopt: str = ''
-            self.flash: False
-            self.file: str = ''
-            self.ready: bool = False
-            self.image = parent
+        TYPE_MBR = 'type=0x{}, '
+        TYPE_GPT = 'type={}, '
+        SIZE = 'size={0}MiB, '
+        SIZEREST = ''
+        BOOTABLE = 'bootable, '
+        # sfdisk(8) input per partition
+        plan = ''
+        # Partition type
+        if self.image.map == 'mbr':
+            plan += TYPE_MBR.format(self.type)
+        else:
+            plan += TYPE_GPT.format(self.type)
+        # Partition size
+        if self.size > 0:
+            plan += SIZE.format(self.size)
+        else:
+            plan += SIZEREST
+        if self.bootable:
+            plan += BOOTABLE
+        return plan
 
-        def gen_plan(self):
-            """
-            Generate a sfdisk(8) script. One partition at a time.
-            """
-            TYPE_MBR = 'type=0x{}, '
-            TYPE_GPT = 'type={}, '
-            SIZE = 'size={0}MiB, '
-            SIZEREST = ''
-            BOOTABLE = 'bootable, '
-            # sfdisk(8) input per partition
-            plan = ''
-            # Partition type
-            if self.image.map == 'mbr':
-                plan += TYPE_MBR.format(self.type)
-            else:
-                plan += TYPE_GPT.format(self.type)
-            # Partition size
-            if self.size > 0:
-                plan += SIZE.format(self.size)
-            else:
-                plan += SIZEREST
-            if self.bootable:
-                plan += BOOTABLE
-            return plan
+    def make_fs(self):
+        """
+        Format a partition (making filesystems).
 
-        def make_fs(self):
-            """
-            Format a partition (making filesystems).
+        :return: None
+        :raise: OSError
+        if called program returned non-zero.
+        """
+        if (not self.fs) or self.type == '05':
+            # In case of an extended partition, there's no point to make an fs here.
+            return
+        if self.fs not in Env.supported_fs:
+            crit(f'Filesystem {self.fs} is not supported in this system.')
+            crit('Treating as an critical error.')
+            raise OhJesusTaskFailed('make_fs', f'Unsupported filesystem: {self.fs}.')
+        exe = f'mkfs.{self.fs}'
+        opts = [exe]
+        if self.name:
+            opts.extend([self.option_label.get(self.fs, '-L'), self.name])
+        opts.extend([f'{self.path}p{self.num}'])
+        res = exc(opts)
+        if res.returncode != 0:
+            raise OhJesusTaskFailed('make_fs', f"Failed to make filesystem {self.fs} at {self.path}p{self.num}.")
 
-            :return: None
-            :raise: OSError
-            if called program returned non-zero.
-            """
-            if (not self.fs) or self.type == '05':
-                # In case of an extended partition, there's no point to make an fs here.
-                return
-            if self.fs not in Env.supported_fs:
-                crit(f'Filesystem {self.fs} is not supported in this system.')
-                crit('Treating as an critical error.')
-                raise OhJesusTaskFailed('make_fs', f'Unsupported filesystem: {self.fs}.')
-            exe = f'mkfs.{self.fs}'
-            opts = [exe]
-            if self.name:
-                opts.extend([self.option_label.get(self.fs, '-L'), self.name])
-            opts.extend([f'{self.path}p{self.num}'])
-            res = exc(opts)
-            if res.returncode != 0:
-                raise OhJesusTaskFailed('make_fs', f"Failed to make filesystem {self.fs} at {self.path}p{self.num}.")
-
-        def make(self):
-            """
-            Function called by Image.make() after the plain image is make.
-            """
-            try:
-                info(f'{self.__class__.__name__}: Making filesystem {self.num}...')
-                self.make_fs()
-            except OhJesusTaskFailed as e:
-                # Chain this to the Image.make() to fail.
-                raise e from e
+    def make(self):
+        """
+        Function called by Image.make() after the plain image is make.
+        """
+        try:
+            info(f'{self.__class__.__name__}: Making filesystem {self.num}...')
+            self.make_fs()
+        except OhJesusTaskFailed as e:
+            # Chain this to the Image.make() to fail.
+            raise e from e
 
 
-class Image(loadable):
+class Image(Loadable):
     """
     Class repesents an image.
     To make an actual image, call make().
@@ -503,15 +517,14 @@ class Image(loadable):
         self.start: int = 2048
         self.map: str = 'mbr'
         self.device = device
-        self.parts: List[self.Partition] = []
-    
+        self.parts: List[Partition] = []
+
     def gen_plan(self):
         """
         Generate sfdisk(8) input.
         """
         info(f"{self.__class__.__name__}: Applying partition map...")
-        plan = []
-        plan.append(f'label: {self.map}')
+        plan = [f'label: {self.map}']
         for i in self.parts:
             plan.append(i.gen_plan())
         info(f'{self.__class__.__name__}: generated plan:\n{plan}')
@@ -523,7 +536,7 @@ class Image(loadable):
         ret = exc(['sfdisk', f'{self.imgpath}/{self.filename}'], inp=plan)
         if ret.returncode != 0:
             raise OhJesusTaskFailed('apply_map', "Failed to run sfdisk(8).")
-    
+
     def mount(self):
         self.loopdev = exc(['losetup', '--find']).stdout
 
@@ -549,11 +562,6 @@ Env: Environment = Environment()
 Devices: List[Device] = []
 DevPath: dict = {}
 
-def LoadDevPath():
-    def parse(path):
-        pass
-
-    pass
 
 def main():
     global Config, Env, filehandler
