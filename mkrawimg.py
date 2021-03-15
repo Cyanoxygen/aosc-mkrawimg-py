@@ -7,6 +7,7 @@ import platform
 import subprocess
 import sys
 from typing import List
+
 import yaml
 
 VERSION = ('0', '1', '0')
@@ -15,7 +16,10 @@ LICENSE = 'GPLv3'
 REPO = ''
 # RESDIR: directory where these config files and devices file placed.
 #         Default is $PWD, but can be changed if the main program file is separated with configs.
-RESDIR = os.path.abspath('/usr/lib/aosc-mkrawimg-py/')
+if os.path.exists('config.yml'):
+    RESDIR = os.path.abspath('.')
+else:
+    RESDIR = os.path.abspath('/usr/lib/aosc-mkrawimg-py/')
 
 SARGS = [
     ['-v', '--verbose', 'Enable debug output', 'store_true', False],
@@ -35,6 +39,7 @@ allowed_vals = {
     'map': ['mbr', 'gpt'],
     'fs_req': ['vfat', 'ext4']
 }
+
 if __name__ == '__main__':
     if platform.system() != 'Linux':
         print('This is not a joke, please run the program in Linux!', file=sys.stderr)
@@ -48,55 +53,107 @@ if __name__ == '__main__':
 # Get current directory
 # May never used, use RESDIR instead.
 PWD = os.path.abspath('.')
-DEVICES = f'{PWD}/devices' if not os.path.exists(f'{RESDIR}/devices') else f'{RESDIR}/devices'
+DEVICES = f'{RESDIR}/devices'
+
+
 #
 #   Logging configuration
 #
 # This section configures the logging module, sets up a logger with two outputs.
 # One is the logfile, and the other is the console output.
-# TODO create a Logger class to handle this.
-# Then the todo in the exc() can be implemented.
+class Jobs:
+    def __init__(self):
+        self.jobqueue: List['Job'] = []
+        self.curjob = None
 
-LOGGER_FORMAT = '%(asctime)-23s | %(levelname)-8s | %(message)s'
-logformatter = logging.Formatter(fmt=LOGGER_FORMAT)
-consolehandler = logging.StreamHandler(sys.stdout)
-consolehandler.setFormatter(logformatter)
-filehandler = logging.FileHandler('/dev/null')
-filehandler.setFormatter(logformatter)
-logger = logging.getLogger('makeimg')
-logger.setLevel('INFO')
-logger.addHandler(consolehandler)
-info = logger.info
-debug = logger.debug
-error = logger.error
-warn = logger.warning
-crit = logger.critical
+    def run(self):
+        while len(self.jobqueue) > 0:
+            try:
+                self.curjob = self.jobqueue.pop(0)
+                self.curjob.make()
+            except OhJesusTaskFailed:
+                self.curjob.errclean()
 
-#
-#   Argparse configuration
-#
-# This section defines command line arguments user can specify.
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        prog=sys.argv[0],
-        description='An utility to generate ready-to-flash AOSC OS images.',
-        epilog=f'(C) {", ".join(AUTHORS)}. This program is licensed under {LICENSE}. \
-    For more information please refer to {REPO}.'
-    )
-    for arg in VARGS:
-        parser.add_argument(arg[0], arg[1], help=arg[2], action=arg[3], default=arg[4], type=arg[5])
-    for arg in SARGS:
-        parser.add_argument(arg[0], arg[1], help=arg[2], action=arg[3], default=arg[4])
-    parser.add_argument('device', help='Target device to make an image for')
-    args = parser.parse_args()
+
+class Logger:
+    """
+    A simple logger class.
+    """
+
+    def __init__(self, fmt: str = '%(asctime)-23s | %(levelname)-8s | %(message)s') -> None:
+        self.format = fmt
+        self.logfile = ''
+        self.logger: logging.Logger = logging.Logger('mkrawimg')
+        self.logformatter: logging.Formatter = logging.Formatter(self.format)
+        self.console: logging.StreamHandler = logging.StreamHandler(sys.stdout)
+        self.nullhandler: logging.FileHandler = logging.FileHandler('/dev/null')
+        self.filehandler = self.nullhandler
+        self.loglevel = 'INFO'
+
+        self.console.setFormatter(self.logformatter)
+        self.nullhandler.setFormatter(self.logformatter)
+
+        self.logger.addHandler(self.console)
+        self.logger.addHandler(self.nullhandler)
+
+        self.logger.setLevel(self.loglevel)
+
+        self.altformatter = logging.Formatter(fmt="%(asctime)-23s | %(message)s")
+        self.altlogger = logging.Logger('mkrawimg')
+        self.altlogger.setLevel(logging.INFO)
+        self.althandler = logging.FileHandler('/dev/null')
+        self.althandler.setFormatter(self.altformatter)
+
+    def setup(self, logfile: str):
+        self.logfile = logfile
+        try:
+            self.filehandler = logging.FileHandler(self.logfile)
+            self.logger.addHandler(self.filehandler)
+        except (OSError, FileNotFoundError):
+            self.filehandler = self.nullhandler
+            self.err("Failed to setup a logfile. Disabling logging into logfile.")
+
+    def info(self, *kwargs):
+        self.logger.info(*kwargs)
+
+    def debug(self, *kwargs):
+        self.logger.debug(*kwargs)
+
+    def crit(self, *kwargs):
+        self.logger.critical(*kwargs)
+
+    def warn(self, *kwargs):
+        self.logger.critical(*kwargs)
+
+    def err(self, *kwargs):
+        self.logger.error(*kwargs)
+
+    def setlevel(self, level=logging.INFO):
+        self.logger.setLevel(level)
+
+    def setupalternatelogger(self) -> str:
+        import random, string
+        rdstr = ''.join(random.sample(string.ascii_letters, 8))
+        try:
+            self.althandler = logging.FileHandler(f'/tmp/aosc-mkrawimg-{rdstr}.log')
+            self.altlogger.addHandler(self.althandler)
+        except Exception as e:
+            raise OSError("Failed to setup temp log file") from e
+        return f'/tmp/aosc-mkrawimg-{rdstr}.log'
+
+    def logtofile(self, string):
+        return self.altlogger.info(string)
+
+
+logger = Logger()
 
 
 #
 #   Utility functions
 #
 def bailout(msg: str = ''):
-    crit(f'A critical error occurred! {msg}')
-    crit('Can not proceed. Bailing out.')
+    logger.crit(f'A critical err occurred! {msg}')
+    logger.crit('Can not proceed. Bailing out.')
     sys.exit(1)
 
 
@@ -105,19 +162,20 @@ class OhJesusTaskFailed(Exception):
     """
     Oh Jesus! A task failed! Need to abort!
     """
+
     def __init__(self, task: str, msg: str) -> None:
         super().__init__(msg)
         self.warn = msg
         self.stderr = f'Jesus: Task {task} failed: {msg}! Can\'t continue.'
         self.task = task
-        crit(self.stderr)
+        logger.crit(self.stderr)
 
     def __init__(self, task: str) -> None:
         super().__init__()
         self.task = task
         self.stderr = f'Jesus: Task {task} failed! Can\'t continue.'
-        crit(self.stderr)
-    
+        logger.crit(self.stderr)
+
     def __str__(self) -> str:
         return self.stderr
 
@@ -126,17 +184,17 @@ class OhJesusProgramExitAbnormally(Exception):
     """
     Oh Jesus! The program just returned non-zero status!
     """
-    def __init__(self, proc: subprocess.CompletedProcess, msg: str) -> None:
-        super().__init__()
-        self.proc = proc
-        self.stderr = f'Jesus: {msg}'
-        crit(self.stderr)
 
-    def __init__(self, proc: subprocess.CompletedProcess) -> None:
+    def __init__(self, proc: subprocess.CompletedProcess, msg: str = "") -> None:
         super().__init__()
         self.proc = proc
-        self.stderr = f'Jesus: {self.proc.args[0]} returned non-zero status {self.proc.returncode}.'
-        crit(self.stderr)
+        if msg:
+            self.givenmsg = msg
+            self.stderr = f'Jesus: {msg}'
+        else:
+            self.givenmsg = ''
+            self.stderr = f'Jesus: {self.proc.args[0]} returned non-zero status {self.proc.returncode}.'
+        logger.crit(self.stderr)
 
     def __str__(self) -> str:
         return self.stderr
@@ -146,11 +204,12 @@ class OhJesusProgramNotFound(Exception):
     """
     Oh Jesus! The program you are trying to execute is not found!
     """
+
     def __init__(self, exe: str) -> None:
         super().__init__()
         self.exe = exe
         self.stderr = f'Jesus: executable {self.exe} not found!'
-        crit(self.stderr)
+        logger.crit(self.stderr)
 
     def __str__(self) -> str:
         return self.stderr
@@ -163,22 +222,27 @@ def exc(exe: list, path: str = None, inp: str = None, test: bool = False) -> sub
     Records stdout and stderr.
     """
     if test:
-        info(f"Executing with subprocess.run {exe}, PWD={path}")
+        logger.info(f"Executing with subprocess.run {exe}, PWD={path}")
         return subprocess.run('true')
-    debug(f'Executing with subprocess.run {exe}, PWD={path}')
+    logger.debug(f'Executing with subprocess.run {exe}, PWD={path}')
     try:
         ret = subprocess.run(args=exe, cwd=path, input=inp, encoding='utf-8',
-                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except FileNotFoundError as e:
         raise OhJesusProgramNotFound(exe[0]) from e
 
-    debug('stdout:')
+    logger.debug('stdout:')
     for i in ret.stdout.splitlines():
-        debug(i)
-    debug("stderr:")
+        logger.debug(i)
+        if logger.logger.level != logging.DEBUG:
+            logger.logtofile(i)
+
+    logger.debug("stderr:")
     for i in ret.stderr.splitlines():
-        debug(i)
-    # TODO: record stdout and stderr into log file even it is not in verbose mode
+        logger.debug(i)
+        if logger.logger.level != logging.DEBUG:
+            logger.logtofile(i)
+
     if ret.returncode != 0:
         raise OhJesusProgramExitAbnormally(ret)
     return ret
@@ -189,6 +253,7 @@ class Loadable:
     A basic class with load() function using black magic (__setattr__()).
     Most of classes in this program will inherit from this so it is not necessary to write a load() function.
     """
+
     def __init__(self):
         pass
 
@@ -203,12 +268,30 @@ class Loadable:
             deftype = type(self.__getattribute__(key))
             keytype = type(spec[key])
             if keytype != deftype:
-                warn(f'Invalid type {keytype} of key {key}. Using default value.')
+                logger.warn(f'Invalid type {keytype} of key {key}. Using default value.')
                 continue
             if key not in self.__dict__:
-                warn(f'Unknown key "{key}" in configuration. It will be ignored.')
+                logger.warn(f'Unknown key "{key}" in configuration. It will be ignored.')
                 continue
             self.__setattr__(key, spec[key])
+
+
+class Job(Loadable):
+    def __init__(self):
+        super().__init__()
+
+    def make(self):
+        """
+        Stub make() function.
+        :raises: OhJesusTaskFailed
+        """
+        raise NotImplementedError
+
+    def errclean(self):
+        """
+        If error occurs, this function is called to clean up the mess.
+        """
+        raise NotImplementedError
 
 
 #
@@ -262,17 +345,17 @@ class AppConfig:
         """
         confname = f'{RESDIR}/config.yml'
         if not os.path.isfile(confname):
-            warn('Unable to find config.yml. Using default configuration.')
+            logger.warn('Unable to find config.yml. Using default configuration.')
             return
 
         try:
             conffile = open(confname, 'r')
         except OSError as e:
-            warn(f'Unable to open config.yml: {e.errno} {e.strerror}.')
-            warn('Using default configuration.')
+            logger.warn(f'Unable to open config.yml: {e.errno} {e.strerror}.')
+            logger.warn('Using default configuration.')
             return
         except Exception as e:
-            warn(f'Unable to open config.yml: {e}. Using default configuration.')
+            logger.warn(f'Unable to open config.yml: {e}. Using default configuration.')
             return
         conf = yaml.safe_load(conffile)
 
@@ -281,10 +364,10 @@ class AppConfig:
             deftype = type(self.__getattribute__(key))
             keytype = type(conf['general'][key])
             if keytype != deftype:
-                warn(f'Invalid type {keytype} of key {key}. Using default value.')
+                logger.warn(f'Invalid type {keytype} of key {key}. Using default value.')
                 continue
             if key not in self.__dict__:
-                warn(f'Unknown key "{key}" in configuration. It will be ignored.')
+                logger.warn(f'Unknown key "{key}" in configuration. It will be ignored.')
                 continue
             self.__setattr__(key, conf['general'][key])
         # load OSConfig in the same way
@@ -292,14 +375,14 @@ class AppConfig:
             deftype = type(self.OSConfig.__getattribute__(key))
             keytype = type(conf['os-install'][key])
             if keytype != deftype:
-                warn(f'Invalid type {keytype} of key {key}. Using default value.')
+                logger.warn(f'Invalid type {keytype} of key {key}. Using default value.')
                 continue
             if key not in self.OSConfig.__dict__:
-                warn(f'Unknown key "{key}" in configuration. It will be ignored.')
+                logger.warn(f'Unknown key "{key}" in configuration. It will be ignored.')
                 continue
             self.OSConfig.__setattr__(key, conf['os-install'][key])
 
-    def load_from_args(self):
+    def load_from_args(self, args: argparse.Namespace):
         # This is the real magic, again
         for key in args.__dict__:
             self.__setattr__(key, args.__dict__[key])
@@ -317,6 +400,7 @@ class Environment:
     and QEMU static emulators to support binfmt.
     Checks are done during .check(), any unmet requirements will result in a immidiate bailout.
     """
+
     def __init__(self) -> None:
         self.supported_fs: list = ['vfat', 'ext4']
         self.arch: str = ''
@@ -347,24 +431,24 @@ class Environment:
     @staticmethod
     def check_binfmt() -> bool:
         # TODO raise an exception instead
-        supported = True
         try:
             with open('/proc/sys/fs/binfmt_misc/status') as f:
                 supported = (f.read() == 'enabled\n')  # bool
         except (FileNotFoundError, OSError):
             supported = False
+
         if supported:
             if len(os.listdir('/proc/sys/fs/binfmt_misc/')) <= 2:
                 # Restart binfmt first
                 subprocess.run(['systemctl', 'restart', 'systemd-binfmt.service'])
                 if len(os.listdir('/proc/sys/fs/binfmt_misc/')) > 2:
                     return False
-                warn('Your system supports binfmt, but no foreign architecture support is enabled.')
-                warn('Please ensure you have qemu and qemu-user-static installed.')
+                logger.warn('Your system supports binfmt, but no foreign architecture support is enabled.')
+                logger.warn('Please ensure you have qemu and qemu-user-static installed.')
                 supported = False
         else:
-            warn('Your system does not support binfmt_misc.')
-            warn('You can only make OS images for same architecture of your machine.')
+            logger.warn('Your system does not support binfmt_misc.')
+            logger.warn('You can only make OS images for same architecture of your machine.')
         return supported
 
     @staticmethod
@@ -373,13 +457,13 @@ class Environment:
         loopdev = subprocess.getoutput('losetup -f')
         loop_support = ('/dev/loop' in loopdev)
         if not loop_support:
-            error('It looks like there is no loop device support for your kernel.')
-            error('We are trying to fix this by manually loading `loop\' kernel module.')
+            logger.err('It looks like there is no loop device support for your kernel.')
+            logger.err('We are trying to fix this by manually loading `loop\' kernel module.')
             ret = subprocess.call(['modprobe', 'loop'])
             if not ret:
                 loop_support = True
             else:
-                error('Oops, your system does not have loop device support which this tool requires.')
+                logger.err('Oops, your system does not have loop device support which this tool requires.')
                 loop_support = False
         return loop_support
 
@@ -389,13 +473,13 @@ class Environment:
             bailout('Requirement does not meet: loop device')
         self.supported_fs = self.check_supported_fs()
         if not set(self.supported_fs).issuperset(allowed_vals['fs_req']):
-            error('Oops, please make sure e2fsprogs and dosfstools are installed and try again.')
+            logger.err('Oops, please make sure e2fsprogs and dosfstools are installed and try again.')
             bailout(f'Missing basic filesystem support: {" and ".join(allowed_vals["fs_req"])}')
         self.arch = self.check_arch()
         self.binfmt = self.check_binfmt()
 
 
-class Device(Loadable):
+class Device(Job):
     def __init__(self):
         """
         Loads a device configuration.
@@ -410,11 +494,17 @@ class Device(Loadable):
         self.path = ['x86_64', 'generic', self.id]
         self.desc = 'Image for Legacy BIOS machines'
 
+    def make(self):
+        pass
+
+    def errclean(self):
+        pass
+
 
 #
 #   Device-related class
 #
-class Partition(Loadable):
+class Partition(Job):
     """
     Defines a partition.
     """
@@ -477,8 +567,8 @@ class Partition(Loadable):
             # In case of an extended partition, there's no point to make an fs here.
             return
         if self.fs not in Env.supported_fs:
-            crit(f'Filesystem {self.fs} is not supported in this system.')
-            crit('Treating as an critical error.')
+            logger.crit(f'Filesystem {self.fs} is not supported in this system.')
+            logger.crit('Treating as an critical err.')
             raise OhJesusTaskFailed('make_fs', f'Unsupported filesystem: {self.fs}.')
         exe = f'mkfs.{self.fs}'
         opts = [exe]
@@ -494,18 +584,22 @@ class Partition(Loadable):
         Function called by Image.make() after the plain image is make.
         """
         try:
-            info(f'{self.__class__.__name__}: Making filesystem {self.num}...')
+            logger.info(f'{self.__class__.__name__}: Making filesystem {self.num}...')
             self.make_fs()
         except OhJesusTaskFailed as e:
             # Chain this to the Image.make() to fail.
             raise e from e
 
+    def errclean(self):
+        pass
 
-class Image(Loadable):
+
+class Image(Job):
     """
     Class repesents an image.
     To make an actual image, call make().
     """
+
     def __init__(self, device: Device):
         super().__init__()
         self.variant: str = 'base'
@@ -523,15 +617,15 @@ class Image(Loadable):
         """
         Generate sfdisk(8) input.
         """
-        info(f"{self.__class__.__name__}: Applying partition map...")
+        logger.info(f"{self.__class__.__name__}: Applying partition map...")
         plan = [f'label: {self.map}']
         for i in self.parts:
             plan.append(i.gen_plan())
-        info(f'{self.__class__.__name__}: generated plan:\n{plan}')
+        logger.info(f'{self.__class__.__name__}: generated plan:\n{plan}')
         return '\n'.join(plan)
 
     def apply_map(self):
-        info(f'{self.__class__.__name__}: Applying partition map...')
+        logger.info(f'{self.__class__.__name__}: Applying partition map...')
         plan = self.gen_plan()
         ret = exc(['sfdisk', f'{self.imgpath}/{self.filename}'], inp=plan)
         if ret.returncode != 0:
@@ -542,7 +636,7 @@ class Image(Loadable):
 
     def make(self):
         # Create an empty image
-        info(f'{self.__class__.__name__}: Creating an empty image...')
+        logger.info(f'{self.__class__.__name__}: Creating an empty image...')
         try:
             exe = ['dd', 'if=/dev/zero', f'of={self.imgpath}/{self.filename}', 'bs=1MiB', f'count={self.size}']
             ret = exc(exe)
@@ -551,11 +645,14 @@ class Image(Loadable):
             # Apply partition map and load it into loop
             self.apply_map()
             for i in self.parts:
-                info(f'Making partition {i.num}...')
+                logger.info(f'Making partition {i.num}...')
                 i.make()
         except (OhJesusTaskFailed, OhJesusProgramExitAbnormally) as e:
             # TODO add cleanup process
             bailout(e)
+
+    def errclean(self):
+        pass
 
 
 Env: Environment = Environment()
@@ -564,34 +661,43 @@ DevPath: dict = {}
 
 
 def main():
-    global Config, Env, filehandler
-    info(f'Welcome to aosc-mkrawimg v{".".join(VERSION)}!')
-    info('Reading config file.')
+    global Config, Env
+    parser = argparse.ArgumentParser(
+        prog=sys.argv[0],
+        description='An utility to generate ready-to-flash AOSC OS images.',
+        epilog=f'(C) {", ".join(AUTHORS)}. This program is licensed under {LICENSE}. \
+        For more information please refer to {REPO}.'
+    )
+    for arg in VARGS:
+        parser.add_argument(arg[0], arg[1], help=arg[2], action=arg[3], default=arg[4], type=arg[5])
+    for arg in SARGS:
+        parser.add_argument(arg[0], arg[1], help=arg[2], action=arg[3], default=arg[4])
+    parser.add_argument('device', help='Target device to make an image for')
+    args = parser.parse_args()
+
+    logger.info(f'Welcome to aosc-mkrawimg v{".".join(VERSION)}!')
+    logger.info('Reading config file.')
     Config.load_from_file()
-    Config.load_from_args()
-    info('Checking environments.')
+    Config.load_from_args(args)
+    logger.info('Checking environments.')
     Env.check()
-    # Time to setup a logfile.
-    try:
-        filehandler = logging.FileHandler(Config.logfile)
-    except:
-        error("Failed to setup a logfile. Disabling logging into logfile.")
+
     # Switch to debug as soon as we can, if either command line or config has enabled it.
     # Now the config is loaded and the command line options are parsed,
     # we really need to do this now.
     # For debug purpose.
     if args.verbose or Config.verbose:
-        logger.setLevel(logging.DEBUG)
-        debug('DEBUG output enabled!')
-        debug('Now your console output could be really messy ^o^')
-    debug('Loaded command options:')
+        logger.setlevel(logging.DEBUG)
+        logger.debug('DEBUG output enabled!')
+        logger.debug('Now your console output could be really messy ^o^')
+    logger.debug('Loaded command options:')
     for key in args.__dict__:
-        debug(f'{key:<12}: {str(args.__dict__[key]):<}')
-    debug('Loaded config:')
+        logger.debug(f'{key:<12}: {str(args.__dict__[key]):<}')
+    logger.debug('Loaded config:')
     for key in Config.__dict__:
-        debug(f'{key:<12}: {Config.__dict__[key]:<}')
+        logger.debug(f'{key:<12}: {Config.__dict__[key]:<}')
     for key in Config.OSConfig.__dict__:
-        debug(f'{key:<12}: {str(Config.OSConfig.__dict__[key]):<}')
+        logger.debug(f'{key:<12}: {str(Config.OSConfig.__dict__[key]):<}')
 
 
 if __name__ == '__main__':
